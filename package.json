@@ -1,0 +1,43 @@
+{
+  "name": "eventcraft-ai",
+  "version": "1.0.0",
+  "description": "EventCraft AI - Autonomous GenAI Event Architecture Engine",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "eventcraft": "dist/src/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/api/server.ts",
+    "start": "ts-node src/api/server.ts",
+    "test": "jest --coverage",
+    "test:silent": "jest --coverage --silent",
+    "cli": "ts-node src/cli/index.ts",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "event-planning",
+    "autonomous-agent",
+    "prompt-engineering",
+    "budget-allocation",
+    "wcag-accessibility"
+  ],
+  "author": "EventCraft AI Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.14.0",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  }
+}
