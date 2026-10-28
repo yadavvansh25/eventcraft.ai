@@ -1,5 +1,3 @@
-import { createApp } from '../src/api/server';
-
-const app = createApp();
+import app from '../src/index';
 
 export default app;

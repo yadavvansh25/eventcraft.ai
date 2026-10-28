@@ -1,5 +1,5 @@
 import { PlannerEngine, LLMProvider, DeterministicLLMProvider } from '../src/engine/plannerEngine';
-import { createEventPlannerEngine } from '../src/index';
+import app, { createEventPlannerEngine, createApp } from '../src/index';
 import { SecurityGuard, PromptInjectionError } from '../src/security/sanitizer';
 import { AccessibilityValidator } from '../src/engine/a11yValidator';
 import { ValidationError, BudgetConservationError } from '../src/security/validator';
@@ -242,6 +242,13 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       expect(result.cleanContext.stagingNeeds).toBe('Grand orchestral setup');
       expect(result.cleanContext.tone).toBe('Renaissance Opulence');
       expect(result.cleanContext.lightingContext).toBe('ballroom');
+    });
+
+    it('should export valid createApp factory and default Express serverless app', () => {
+      expect(typeof createApp).toBe('function');
+      const testApp = createApp();
+      expect(testApp).toBeDefined();
+      expect(app).toBeDefined();
     });
   });
 });
