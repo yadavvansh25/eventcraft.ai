@@ -1,26 +1,30 @@
 /**
- * EventCraft AI - Autonomous GenAI Event Architecture Engine
- * Core Library Entrypoint
+ * EventCraft AI - Autonomous Event Architecture Engine
+ * Public API & Factory Functions
  */
 
-// Domain & Schemas
-export * from './core/domain/errors';
-export * from './core/domain/event.types';
-export * from './core/domain/plan.schema';
+import { LLMProvider, PlannerEngine } from './engine/plannerEngine';
+import { SecurityGuard } from './security/sanitizer';
+import { AccessibilityValidator } from './engine/a11yValidator';
 
-// Security
-export * from './core/security/security.interface';
-export * from './core/security/pii-sanitizer';
-export * from './core/security/prompt-guard';
+// Types & Metadata
+export * from './types/event.types';
 
-// Computational Engine
-export * from './core/engine/budget-allocator';
-export * from './core/engine/reverse-timeline';
-export * from './core/engine/vendor-procurement';
-export * from './core/engine/theme-studio';
-export * from './core/engine/accessibility-mapper';
+// Security & Validation
+export * from './security/sanitizer';
+export * from './security/validator';
 
-// LLM & Orchestration
-export * from './core/llm/llm-provider.interface';
-export * from './core/llm/deterministic-llm-provider';
-export * from './core/orchestrator/eventcraft-engine';
+// Engine & Prompts
+export * from './engine/systemPrompts';
+export * from './engine/a11yValidator';
+export * from './engine/plannerEngine';
+
+/**
+ * Factory function to create an EventCraft AI Planner Engine instance
+ * with optional custom LLM Provider.
+ */
+export function createEventPlannerEngine(llmProvider?: LLMProvider): PlannerEngine {
+  const securityGuard = new SecurityGuard();
+  const a11yValidator = new AccessibilityValidator();
+  return new PlannerEngine(securityGuard, a11yValidator, llmProvider);
+}

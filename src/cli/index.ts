@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
-import { EventCraftEngine } from '../core/orchestrator/eventcraft-engine';
-import { EventType, RawEventRequest } from '../core/domain/event.types';
+import { PlannerEngine } from '../engine/plannerEngine';
+import { EventType, EventPlanRequest } from '../types/event.types';
 
 function parseArgs(args: string[]): {
   type: EventType;
@@ -72,9 +72,6 @@ Options:
   --output <filepath>  Save generated blueprint JSON to file
   --json               Output raw formatted JSON only (ideal for piping)
   --help, -h           Show this help manual
-
-Example:
-  npx ts-node src/cli/index.ts --type wedding --budget 40000 --guests 150 --date 2026-11-20
 `);
 }
 
@@ -87,9 +84,9 @@ async function run(): Promise<void> {
     process.exit(0);
   }
 
-  const engine = new EventCraftEngine();
+  const engine = new PlannerEngine();
 
-  const request: RawEventRequest = {
+  const request: EventPlanRequest = {
     eventType: options.type,
     budget: options.budget,
     currency: options.currency,
@@ -99,7 +96,7 @@ async function run(): Promise<void> {
   };
 
   try {
-    const result = await engine.synthesize(request);
+    const result = await engine.generatePlan(request);
     const plan = result.plan;
 
     if (options.output) {
@@ -115,7 +112,6 @@ async function run(): Promise<void> {
       return;
     }
 
-    // Rich Terminal Dashboard
     console.log(`
 ===================================================================
 EVENTCRAFT AI — AUTONOMOUS BLUEPRINT GENERATED
@@ -154,7 +150,7 @@ Accessibility:  ${plan.accessibility.wcagLevel}
 3. VENDOR PROCUREMENT & ONE-CLICK RFP BRIEFS
 -------------------------------------------------------------------`);
     for (const vendor of plan.vendorChecklist) {
-      console.log(`• ID: ${vendor.id} | Category: ${vendor.category}`);
+      console.log(`• ID: ${vendor.id} | Role: ${vendor.role} (${vendor.category})`);
       console.log(`  Deliverables: ${vendor.deliverables.length} line items defined`);
     }
 
@@ -162,10 +158,10 @@ Accessibility:  ${plan.accessibility.wcagLevel}
 -------------------------------------------------------------------
 4. THEME STUDIO & WCAG 2.1 AA COLOR TOKENS
 -------------------------------------------------------------------
-Theme: ${plan.creativeSuite.themeName}`);
+Theme: ${plan.creativeSuite.vibeName}`);
     for (const token of plan.creativeSuite.colorPalette) {
       console.log(
-        `• ${token.tokenName.padEnd(34)}: ${token.hex} (Contrast: ${token.contrastRatioAgainstWhite}:1 against white | WCAG Compliant: ${token.wcagCompliant})`
+        `• ${token.tokenName.padEnd(30)}: ${token.hex} (Contrast: ${token.contrastRatioAgainstWhite}:1 | WCAG Pass: ${token.wcagCompliant})`
       );
     }
 

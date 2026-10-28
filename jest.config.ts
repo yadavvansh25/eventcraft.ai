@@ -17,10 +17,15 @@ const config: Config = {
   collectCoverage: true,
   coverageDirectory: '<rootDir>/coverage',
   collectCoverageFrom: [
-    'src/core/**/*.ts',
-    '!src/core/domain/errors.ts',
+    'src/types/**/*.ts',
+    'src/security/**/*.ts',
+    'src/engine/**/*.ts',
+    'src/index.ts',
     '!src/**/*.d.ts',
     '!src/client/**',
+    '!src/api/**',
+    '!src/cli/**',
+    '!src/core/**',
   ],
   coverageThreshold: {
     global: {

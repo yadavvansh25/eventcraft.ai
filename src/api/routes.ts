@@ -1,14 +1,11 @@
 import { Request, Response, Router } from 'express';
-import { EventCraftEngine } from '../core/orchestrator/eventcraft-engine';
-import { PIISanitizer } from '../core/security/pii-sanitizer';
-import { PromptGuard } from '../core/security/prompt-guard';
-import { EventCraftPlanSchema } from '../core/domain/plan.schema';
-import { EventCraftError } from '../core/domain/errors';
+import { PlannerEngine } from '../engine/plannerEngine';
+import { SecurityGuard, SecurityError } from '../security/sanitizer';
+import { EventValidator, ValidationError } from '../security/validator';
 
-export function createEventCraftRouter(engine: EventCraftEngine = new EventCraftEngine()): Router {
+export function createEventCraftRouter(engine: PlannerEngine = new PlannerEngine()): Router {
   const router = Router();
-  const sanitizer = new PIISanitizer();
-  const promptGuard = new PromptGuard();
+  const guard = new SecurityGuard();
 
   /**
    * Health Check
@@ -22,8 +19,8 @@ export function createEventCraftRouter(engine: EventCraftEngine = new EventCraft
       capabilities: [
         'Single-pass deterministic synthesis',
         'OWASP Top-10 prompt injection defense',
-        'Dual-pass PII scrubbing',
-        'Zero-sum budget conservation',
+        'Dual-pass PII scrubbing (phone, email, SSN, Aadhaar, CC)',
+        'Zero-sum budget conservation (Variance ≡ 0.00)',
         'WCAG 2.1 AA luminance contrast calculations',
       ],
     });
@@ -34,7 +31,7 @@ export function createEventCraftRouter(engine: EventCraftEngine = new EventCraft
    */
   router.post('/plan', async (req: Request, res: Response): Promise<void> => {
     try {
-      const result = await engine.synthesize(req.body);
+      const result = await engine.generatePlan(req.body);
       res.status(200).json({
         success: true,
         data: result.plan,
@@ -44,12 +41,24 @@ export function createEventCraftRouter(engine: EventCraftEngine = new EventCraft
         },
       });
     } catch (error) {
-      if (error instanceof EventCraftError) {
+      if (error instanceof SecurityError) {
         res.status(400).json({
           success: false,
           error: {
             code: error.code,
             message: error.message,
+          },
+        });
+        return;
+      }
+
+      if (error instanceof ValidationError) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: error.name,
+            message: error.message,
+            issues: error.issues,
           },
         });
         return;
@@ -66,40 +75,40 @@ export function createEventCraftRouter(engine: EventCraftEngine = new EventCraft
   });
 
   /**
-   * Security Pre-flight Sanitization & Injection Inspection
+   * Security Pre-flight Sanitization & Threat Inspection
    */
   router.post('/sanitize', (req: Request, res: Response): void => {
     const rawText = String(req.body?.text ?? '');
-    const piiResult = sanitizer.sanitize(rawText);
-    const guardResult = promptGuard.analyze(piiResult.sanitizedText);
+    const piiResult = guard.scrubPII(rawText);
+    const threatAnalysis = guard.analyze(piiResult.sanitizedText);
 
     res.status(200).json({
-      sanitizedText: guardResult.sanitizedDirective,
-      isSafe: guardResult.isSafe,
-      riskScore: guardResult.riskScore,
-      detectedThreats: guardResult.detectedThreats,
+      sanitizedText: threatAnalysis.neutralizedText,
+      isSafe: threatAnalysis.isSafe,
+      riskScore: threatAnalysis.riskScore,
+      detectedThreats: threatAnalysis.detectedThreats,
       piiRedactedCount: piiResult.redactedCount,
       detectedPiiTypes: piiResult.detectedTypes,
     });
   });
 
   /**
-   * Plan Schema Contract Verification
+   * Plan Contract Validation
    */
   router.post('/validate', (req: Request, res: Response): void => {
-    const parseResult = EventCraftPlanSchema.safeParse(req.body);
-    if (!parseResult.success) {
+    try {
+      const plan = EventValidator.validatePlan(req.body);
+      res.status(200).json({
+        valid: true,
+        planId: plan.planId,
+      });
+    } catch (error) {
       res.status(422).json({
         valid: false,
-        issues: parseResult.error.issues,
+        issues: error instanceof ValidationError ? error.issues : [],
+        message: error instanceof Error ? error.message : 'Plan failed contract validation',
       });
-      return;
     }
-
-    res.status(200).json({
-      valid: true,
-      planId: parseResult.data.planId,
-    });
   });
 
   return router;
