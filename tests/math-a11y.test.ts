@@ -149,6 +149,28 @@ describe('Deterministic Math & WCAG 2.1 AA Accessibility Test Suite', () => {
     it('should throw ValidationError when validating a malformed plan object', () => {
       expect(() => EventValidator.validatePlan({ planId: '' })).toThrow(/Output plan violates unified/);
     });
+
+    it('should calculate contrast ratio against pure black', () => {
+      const whiteAgainstBlack = a11yValidator.calculateContrastAgainstBlack('#FFFFFF');
+      expect(whiteAgainstBlack).toBeCloseTo(21.0, 1);
+      const blackAgainstBlack = a11yValidator.calculateContrastAgainstBlack('#000000');
+      expect(blackAgainstBlack).toBeCloseTo(1.0, 1);
+    });
+
+    it('should verify WCAG AAA compliance thresholds and level categorization', () => {
+      // Normal text threshold: 7.0:1
+      expect(a11yValidator.isWCAGAAACompliant(7.0, false)).toBe(true);
+      expect(a11yValidator.isWCAGAAACompliant(6.99, false)).toBe(false);
+
+      // Large elements threshold: 4.5:1
+      expect(a11yValidator.isWCAGAAACompliant(4.5, true)).toBe(true);
+      expect(a11yValidator.isWCAGAAACompliant(4.49, true)).toBe(false);
+
+      // getWCAGLevel evaluation
+      expect(a11yValidator.getWCAGLevel(8.0)).toBe('AAA');
+      expect(a11yValidator.getWCAGLevel(5.0)).toBe('AA');
+      expect(a11yValidator.getWCAGLevel(2.0)).toBe('FAIL');
+    });
   });
 
   describe('Accessibility Meta Verification in Milestones', () => {

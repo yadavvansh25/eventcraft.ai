@@ -1,5 +1,6 @@
 import { AccessibilityValidator } from './a11yValidator';
 import { SystemPrompts } from './systemPrompts';
+import { PlanCache, CacheStats } from './cache';
 import { SecurityGuard } from '../security/sanitizer';
 import { EventValidator } from '../security/validator';
 import {
@@ -11,6 +12,7 @@ import {
   BudgetSplit,
   CreativeTheme,
   AccessibilityManifest,
+  GenerationResult,
 } from '../types/event.types';
 
 /**
@@ -365,11 +367,18 @@ export class DeterministicLLMProvider implements LLMProvider {
         ratio = this.a11yValidator.calculateContrastAgainstWhite(currentHex);
       }
 
+      const contrastRatioAgainstBlack = Number(
+        this.a11yValidator.calculateContrastAgainstBlack(currentHex).toFixed(2)
+      );
+      const wcagLevel = this.a11yValidator.getWCAGLevel(ratio);
+
       return {
         hex: currentHex.toUpperCase(),
         tokenName: t.tokenName,
         contrastRatioAgainstWhite: Number(ratio.toFixed(2)),
+        contrastRatioAgainstBlack,
         wcagCompliant: ratio >= 4.5,
+        wcagLevel,
       };
     });
 
@@ -435,23 +444,43 @@ export class PlannerEngine {
   constructor(
     private readonly securityGuard: SecurityGuard = new SecurityGuard(),
     private readonly a11yValidator: AccessibilityValidator = new AccessibilityValidator(),
-    private readonly llmProvider: LLMProvider = new DeterministicLLMProvider()
+    private readonly llmProvider: LLMProvider = new DeterministicLLMProvider(),
+    private readonly cache: PlanCache = new PlanCache()
   ) {}
 
   /**
-   * Primary Entry Point: Generates a complete, verified EventPlan from user input.
+   * Returns live LRU cache statistics.
    */
-  public async generatePlan(rawRequest: unknown): Promise<{
-    plan: EventPlan;
-    executionTimeMs: number;
-    cleanContext: CleanContextPayload;
-  }> {
+  public getCacheStats(): CacheStats {
+    return this.cache.getStats();
+  }
+
+  /**
+   * Flushes all stored plan blueprints from the LRU cache.
+   */
+  public clearCache(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * Primary Entry Point: Generates a complete, verified EventPlan from user input.
+   * Utilizes in-memory LRU caching for sub-millisecond retrieval on identical signatures.
+   */
+  public async generatePlan(rawRequest: unknown): Promise<GenerationResult> {
     const startTime = performance.now();
 
-    // 1. Zod Request Validation
+    // 1. Payload Boundary Enforcement (Denial of Wallet Defense)
+    if (typeof rawRequest === 'object' && rawRequest !== null && 'userNotes' in rawRequest) {
+      const candidateNotes = (rawRequest as { userNotes?: unknown }).userNotes;
+      if (typeof candidateNotes === 'string') {
+        this.securityGuard.enforcePayloadLimit(candidateNotes);
+      }
+    }
+
+    // 2. Zod Request Validation
     const validatedRequest = EventValidator.validateRequest(rawRequest);
 
-    // 2. Security Pass A: Dual-Pass PII Scrubbing
+    // 2. Security Pass A: Deep PII Scrubbing
     const piiResult = this.securityGuard.scrubPII(validatedRequest.userNotes);
 
     // 3. Security Pass B: OWASP Prompt Injection Defense
@@ -480,37 +509,55 @@ export class PlannerEngine {
       },
     };
 
-    // 5. Hardened Prompts with XML Delimiter Sandboxing
+    // 5. In-Memory LRU Cache Check (Sub-millisecond retrieval)
+    const cacheKey = this.cache.generateKey(cleanContext);
+    const cachedPlan = this.cache.get(cacheKey);
+    if (cachedPlan) {
+      const executionTimeMs = Number((performance.now() - startTime).toFixed(2));
+      return {
+        plan: cachedPlan,
+        executionTimeMs,
+        cleanContext,
+        fromCache: true,
+      };
+    }
+
+    // 6. Hardened Prompts with XML Delimiter Sandboxing
     const masterSystemPrompt = SystemPrompts.getMasterSystemPrompt();
     const sandboxedUserPrompt = SystemPrompts.formatUserPrompt(cleanContext);
 
-    // 6. Single-Pass LLM Orchestration
+    // 7. Single-Pass LLM Orchestration
     const rawPlan = await this.llmProvider.generatePlan(
       cleanContext,
       masterSystemPrompt,
       sandboxedUserPrompt
     );
 
-    // 7. Deterministic Mathematical Budget Verification (Sum = Total Budget)
+    // 8. Deterministic Mathematical Budget Verification (Sum = Total Budget, O(N))
     EventValidator.verifyBudgetConservation(
       rawPlan.budget.totalAmount,
       rawPlan.budget.allocations
     );
 
-    // 8. Deterministic WCAG Contrast Verification (>= 4.5:1)
+    // 9. Deterministic WCAG Contrast Verification (>= 4.5:1)
     const a11yResult = this.a11yValidator.validatePalette(rawPlan.creativeSuite.colorPalette);
     if (!a11yResult.valid) {
       throw new Error(`Accessibility Validation Error: ${a11yResult.summary}`);
     }
 
-    // 9. Full Output Schema Validation
+    // 10. Full Output Schema Validation
     const validatedPlan = EventValidator.validatePlan(rawPlan);
+
+    // 11. Populate LRU Cache
+    this.cache.set(cacheKey, validatedPlan);
+
     const executionTimeMs = Number((performance.now() - startTime).toFixed(2));
 
     return {
       plan: validatedPlan,
       executionTimeMs,
       cleanContext,
+      fromCache: false,
     };
   }
 }

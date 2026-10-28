@@ -77,12 +77,37 @@ export class AccessibilityValidator {
   }
 
   /**
+   * Computes contrast ratio against pure black (#000000, L = 0.0).
+   */
+  public calculateContrastAgainstBlack(hex: string): number {
+    return this.calculateContrastRatio(hex, '#000000');
+  }
+
+  /**
    * Asserts whether contrast ratio meets WCAG 2.1 AA standard:
    * >= 4.5:1 for normal text, >= 3.0:1 for large text/elements.
    */
   public isWCAGCompliant(contrastRatio: number, isLargeElement: boolean = false): boolean {
     const threshold = isLargeElement ? 3.0 : 4.5;
     return contrastRatio >= threshold;
+  }
+
+  /**
+   * Asserts whether contrast ratio meets WCAG 2.1 AAA standard:
+   * >= 7.0:1 for normal text, >= 4.5:1 for large text/elements.
+   */
+  public isWCAGAAACompliant(contrastRatio: number, isLargeElement: boolean = false): boolean {
+    const threshold = isLargeElement ? 4.5 : 7.0;
+    return contrastRatio >= threshold;
+  }
+
+  /**
+   * Evaluates WCAG compliance level ('AAA', 'AA', or 'FAIL').
+   */
+  public getWCAGLevel(contrastRatio: number, isLargeElement: boolean = false): 'AAA' | 'AA' | 'FAIL' {
+    if (this.isWCAGAAACompliant(contrastRatio, isLargeElement)) return 'AAA';
+    if (this.isWCAGCompliant(contrastRatio, isLargeElement)) return 'AA';
+    return 'FAIL';
   }
 
   /**

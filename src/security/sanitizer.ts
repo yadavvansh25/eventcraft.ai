@@ -1,5 +1,11 @@
 /**
- * SecurityGuard: OWASP Top-10 LLM Defense, Dual-Pass PII Scrubbing & Injection Neutralization
+ * SecurityGuard: OWASP Top-10 LLM Defense, Comprehensive PII Scrubbing & Injection Neutralization
+ *
+ * Implements:
+ * 1. Deep PII masking: Emails, Phones, IPv4/IPv6, Credit Cards, SSN, PAN, Aadhaar, Contextual Names.
+ * 2. OWASP LLM01 Prompt Injection & Jailbreak Armor: Prefix overrides, DAN persona, delimiter escapes.
+ * 3. Script & XSS defanging: script, iframe, embed, object, eval, inline handlers.
+ * 4. Denial of Wallet / Token Exhaustion defense: Input payload boundary enforcement (2,000 char max).
  */
 
 export class SecurityError extends Error {
@@ -20,6 +26,18 @@ export class PromptInjectionError extends SecurityError {
     super(message, 'PROMPT_INJECTION_DETECTED');
     this.name = 'PromptInjectionError';
     this.detectedVector = detectedVector;
+  }
+}
+
+export class PayloadLimitError extends SecurityError {
+  public readonly maxLength: number;
+  public readonly actualLength: number;
+
+  constructor(message: string, maxLength: number, actualLength: number) {
+    super(message, 'PAYLOAD_LIMIT_EXCEEDED');
+    this.name = 'PayloadLimitError';
+    this.maxLength = maxLength;
+    this.actualLength = actualLength;
   }
 }
 
@@ -44,19 +62,33 @@ interface ThreatPattern {
 }
 
 export class SecurityGuard {
+  /** Maximum allowable character count for untrusted user inputs (Denial of Wallet mitigation) */
+  public static readonly MAX_INPUT_LENGTH = 2000;
+
   // --- High-Confidence PII Regular Expressions ---
   private static readonly EMAIL_REGEX =
     /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 
-  // Handles international (+1, +44, +91) and local phone numbers
+  // Handles international (+1, +44, +91, +33, etc.) and national telephone formats
   private static readonly PHONE_REGEX =
-    /(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)\d{3,4}[-.\s]?\d{3,5}(?!\d)/g;
+    /(?:\+?\d{1,4}[-.\s]?)?(?:\(?\d{2,5}\)?[-.\s]?)\d{3,4}[-.\s]?\d{3,5}(?!\d)/g;
 
   // US Social Security Numbers
   private static readonly SSN_REGEX = /\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g;
 
+  // Indian PAN (Permanent Account Number: 5 letters, 4 digits, 1 letter)
+  private static readonly PAN_REGEX = /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g;
+
   // Indian Aadhaar format (12 digits grouped into 4s)
   private static readonly AADHAAR_REGEX = /\b[2-9]\d{3}[-\s]\d{4}[-\s]\d{4}\b/g;
+
+  // IPv4 Addresses
+  private static readonly IPV4_REGEX =
+    /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g;
+
+  // IPv6 Addresses
+  private static readonly IPV6_REGEX =
+    /\b(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}\b/g;
 
   // Standard Credit Cards (13-19 digits, spaced or dashed)
   private static readonly CREDIT_CARD_REGEX =
@@ -79,7 +111,7 @@ export class SecurityGuard {
     {
       id: 'SYSTEM_COMMAND_HIJACK',
       pattern:
-        /\b(?:system\s+override|system\s+directive|new\s+system\s+prompt|admin\s+mode|root\s+access|developer\s+mode\s+enabled)\b/i,
+        /\b(?:system\s+override|system\s+directive|new\s+system\s+prompt|system\s+role\s+override|admin\s+mode|root\s+access|developer\s+mode\s+enabled)\b/i,
       severity: 'critical',
       description: 'Privilege escalation or administrative system override attempt',
     },
@@ -102,9 +134,9 @@ export class SecurityGuard {
     {
       id: 'SCRIPT_PAYLOAD',
       pattern:
-        /(?:<script[\s\S]*?>[\s\S]*?<\/script>|<script\b|javascript:|onerror\s*=|onload\s*=|eval\s*\(|document\.cookie)/i,
+        /(?:<script[\s\S]*?>[\s\S]*?<\/script>|<script\b|<iframe\b|<object\b|<embed\b|<applet\b|javascript:|onerror\s*=|onload\s*=|onclick\s*=|eval\s*\(|document\.cookie)/i,
       severity: 'critical',
-      description: 'Embedded executable script or cross-site scripting payload',
+      description: 'Embedded executable script, iframe, or cross-site scripting payload',
     },
     // 4. Prompt Exfiltration / Leakage
     {
@@ -125,7 +157,22 @@ export class SecurityGuard {
   ];
 
   /**
-   * Dual-pass PII scrubber: replaces sensitive identifiers with [REDACTED] tokens.
+   * Enforces payload character boundaries to mitigate Denial of Wallet attacks.
+   */
+  public enforcePayloadLimit(input: string, maxLength: number = SecurityGuard.MAX_INPUT_LENGTH): string {
+    if (!input || typeof input !== 'string') return '';
+    if (input.length > maxLength) {
+      throw new PayloadLimitError(
+        `Input payload of ${input.length} characters exceeds maximum allowable limit of ${maxLength} characters.`,
+        maxLength,
+        input.length
+      );
+    }
+    return input;
+  }
+
+  /**
+   * Deep PII scrubber: replaces sensitive identifiers with [REDACTED] tokens.
    */
   public scrubPII(input: string): SanitizationResult {
     if (!input || typeof input !== 'string') {
@@ -149,9 +196,27 @@ export class SecurityGuard {
       return '[REDACTED]';
     });
 
+    currentText = currentText.replace(SecurityGuard.PAN_REGEX, () => {
+      redactedCount++;
+      detectedTypesSet.add('pan');
+      return '[REDACTED]';
+    });
+
     currentText = currentText.replace(SecurityGuard.AADHAAR_REGEX, () => {
       redactedCount++;
       detectedTypesSet.add('aadhaar');
+      return '[REDACTED]';
+    });
+
+    currentText = currentText.replace(SecurityGuard.IPV4_REGEX, () => {
+      redactedCount++;
+      detectedTypesSet.add('ipv4');
+      return '[REDACTED]';
+    });
+
+    currentText = currentText.replace(SecurityGuard.IPV6_REGEX, () => {
+      redactedCount++;
+      detectedTypesSet.add('ipv6');
       return '[REDACTED]';
     });
 
@@ -241,10 +306,14 @@ export class SecurityGuard {
 
     let cleaned = input;
 
-    // Defang script tags and executable patterns
+    // Defang script and iframe tags
     cleaned = cleaned.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '[DEFANGED_SCRIPT]');
     cleaned = cleaned.replace(/<script\b/gi, '[script');
+    cleaned = cleaned.replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, '[DEFANGED_IFRAME]');
+    cleaned = cleaned.replace(/<iframe\b/gi, '[iframe');
+    cleaned = cleaned.replace(/<(object|embed|applet)\b/gi, '[$1');
     cleaned = cleaned.replace(/javascript:/gi, 'blocked-script:');
+    cleaned = cleaned.replace(/eval\s*\(/gi, 'blocked-eval(');
 
     // Defang markdown and XML delimiters
     cleaned = cleaned.replace(/```/g, "'''");

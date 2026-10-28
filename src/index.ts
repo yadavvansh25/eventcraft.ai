@@ -11,14 +11,16 @@ import { createApp } from './api/server';
 // Types & Metadata
 export * from './types/event.types';
 
-// Security & Validation
+// Security, Rate Limiting & Validation
 export * from './security/sanitizer';
 export * from './security/validator';
+export * from './security/rateLimiter';
 
-// Engine & Prompts
+// Engine, Cache & Prompts
 export * from './engine/systemPrompts';
 export * from './engine/a11yValidator';
 export * from './engine/plannerEngine';
+export * from './engine/cache';
 
 // Server & Microservice App
 export { createApp } from './api/server';

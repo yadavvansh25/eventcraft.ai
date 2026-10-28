@@ -1,14 +1,21 @@
 import { Request, Response, Router } from 'express';
 import { PlannerEngine } from '../engine/plannerEngine';
-import { SecurityGuard, SecurityError } from '../security/sanitizer';
+import { SecurityGuard, SecurityError, PayloadLimitError } from '../security/sanitizer';
 import { EventValidator, ValidationError } from '../security/validator';
+import { RateLimiter, createRateLimitMiddleware } from '../security/rateLimiter';
 
-export function createEventCraftRouter(engine: PlannerEngine = new PlannerEngine()): Router {
+export function createEventCraftRouter(
+  engine: PlannerEngine = new PlannerEngine(),
+  rateLimiter: RateLimiter = new RateLimiter()
+): Router {
   const router = Router();
   const guard = new SecurityGuard();
 
+  // Sliding-Window In-Memory Rate Limiting
+  router.use(createRateLimitMiddleware(rateLimiter));
+
   /**
-   * Health Check
+   * Health Check with Cache & Service Metrics
    */
   router.get('/health', (_req: Request, res: Response): void => {
     res.status(200).json({
@@ -19,15 +26,18 @@ export function createEventCraftRouter(engine: PlannerEngine = new PlannerEngine
       capabilities: [
         'Single-pass deterministic synthesis',
         'OWASP Top-10 prompt injection defense',
-        'Dual-pass PII scrubbing (phone, email, SSN, Aadhaar, CC)',
+        'Deep PII scrubbing (phone, email, SSN, PAN, Aadhaar, IP, CC)',
         'Zero-sum budget conservation (Variance ≡ 0.00)',
-        'WCAG 2.1 AA luminance contrast calculations',
+        'WCAG 2.1 AA/AAA luminance contrast calculations',
+        'In-memory deterministic LRU plan caching',
+        'Sliding-window request rate limiting',
       ],
+      cache: engine.getCacheStats(),
     });
   });
 
   /**
-   * Primary Plan Generation Endpoint
+   * Primary Plan Generation Endpoint (Supports LRU Cache Hit/Miss)
    */
   router.post('/plan', async (req: Request, res: Response): Promise<void> => {
     try {
@@ -37,10 +47,24 @@ export function createEventCraftRouter(engine: PlannerEngine = new PlannerEngine
         data: result.plan,
         meta: {
           executionTimeMs: result.executionTimeMs,
+          fromCache: result.fromCache ?? false,
           securityAudit: result.cleanContext.securityAudit,
         },
       });
     } catch (error) {
+      if (error instanceof PayloadLimitError) {
+        res.status(413).json({
+          success: false,
+          error: {
+            code: error.code,
+            message: error.message,
+            maxLength: error.maxLength,
+            actualLength: error.actualLength,
+          },
+        });
+        return;
+      }
+
       if (error instanceof SecurityError) {
         res.status(400).json({
           success: false,
@@ -109,6 +133,16 @@ export function createEventCraftRouter(engine: PlannerEngine = new PlannerEngine
         message: error instanceof Error ? error.message : 'Plan failed contract validation',
       });
     }
+  });
+
+  /**
+   * Cache Performance Statistics
+   */
+  router.get('/cache/stats', (_req: Request, res: Response): void => {
+    res.status(200).json({
+      success: true,
+      stats: engine.getCacheStats(),
+    });
   });
 
   return router;

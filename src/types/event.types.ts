@@ -11,12 +11,15 @@ export type VendorStatus = 'pending_rfp' | 'outreach' | 'quoted' | 'contracted';
 
 export type AriaLiveMode = 'polite' | 'assertive' | 'off';
 
+export type WCAGLevel = 'AAA' | 'AA' | 'FAIL';
+
 /**
  * Accessibility metadata for ARIA screen-reader orchestration
  */
 export interface AccessibilityMeta {
   readonly ariaLive: AriaLiveMode;
   readonly ariaLabel: string;
+  readonly ariaDescription?: string;
   readonly focusIndex: number;
 }
 
@@ -71,7 +74,9 @@ export interface ColorToken {
   hex: string;
   tokenName: string;
   contrastRatioAgainstWhite: number;
+  contrastRatioAgainstBlack?: number;
   wcagCompliant: boolean;
+  wcagLevel?: WCAGLevel;
   isLargeElementOnly?: boolean;
 }
 
@@ -148,8 +153,18 @@ export interface CleanContextPayload {
   readonly tone: string;
   readonly lightingContext: 'indoor' | 'outdoor_day' | 'outdoor_night' | 'ballroom' | 'park';
   readonly securityAudit: {
-    piiRedactedCount: number;
-    detectedPiiTypes: readonly string[];
-    injectionNeutralized: boolean;
+    readonly piiRedactedCount: number;
+    readonly detectedPiiTypes: readonly string[];
+    readonly injectionNeutralized: boolean;
   };
+}
+
+/**
+ * Unified generation execution result
+ */
+export interface GenerationResult {
+  readonly plan: EventPlan;
+  readonly executionTimeMs: number;
+  readonly cleanContext: CleanContextPayload;
+  readonly fromCache?: boolean;
 }

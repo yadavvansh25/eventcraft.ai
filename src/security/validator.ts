@@ -81,6 +81,7 @@ export const BudgetLedgerSchema = z
 export const AccessibilityMetaSchema = z.object({
   ariaLive: z.enum(['polite', 'assertive', 'off']),
   ariaLabel: z.string().min(1),
+  ariaDescription: z.string().optional(),
   focusIndex: z.number().int().nonnegative(),
 });
 
@@ -116,7 +117,9 @@ export const ColorTokenSchema = z.object({
   hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a 6-character hex code'),
   tokenName: z.string().min(1),
   contrastRatioAgainstWhite: z.number().positive(),
+  contrastRatioAgainstBlack: z.number().positive().optional(),
   wcagCompliant: z.boolean(),
+  wcagLevel: z.enum(['AAA', 'AA', 'FAIL']).optional(),
   isLargeElementOnly: z.boolean().optional(),
 });
 

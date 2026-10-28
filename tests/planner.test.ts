@@ -1,9 +1,11 @@
 import { PlannerEngine, LLMProvider, DeterministicLLMProvider } from '../src/engine/plannerEngine';
+import { PlanCache } from '../src/engine/cache';
 import app, { createEventPlannerEngine, createApp } from '../src/index';
-import { SecurityGuard, PromptInjectionError } from '../src/security/sanitizer';
+import { SecurityGuard, PromptInjectionError, PayloadLimitError } from '../src/security/sanitizer';
 import { AccessibilityValidator } from '../src/engine/a11yValidator';
 import { ValidationError, BudgetConservationError } from '../src/security/validator';
 import { CleanContextPayload, EventPlan, EventPlanRequest } from '../src/types/event.types';
+import request from 'supertest';
 
 describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
   let engine: PlannerEngine;
@@ -14,7 +16,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
 
   describe('Multi-Typology Synthesis', () => {
     it('should generate a valid Wedding blueprint with zero balance errors and WCAG compliance', async () => {
-      const request: EventPlanRequest = {
+      const planReq: EventPlanRequest = {
         eventType: 'wedding',
         budget: 45000,
         currency: 'USD',
@@ -23,7 +25,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
         userNotes: 'Contact coordinator Mary at 555-123-4567 for florals. Require step-free access and vegan menu.',
       };
 
-      const result = await engine.generatePlan(request);
+      const result = await engine.generatePlan(planReq);
       const plan = result.plan;
 
       // Plan structural verification
@@ -45,12 +47,19 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       expect(plan.vendorChecklist.length).toBeGreaterThanOrEqual(2);
       expect(plan.creativeSuite.colorPalette.length).toBeGreaterThanOrEqual(4);
 
-      // Execution latency check (< 50ms)
+      // Verify contrast against black and WCAG level on tokens
+      for (const token of plan.creativeSuite.colorPalette) {
+        expect(token.contrastRatioAgainstBlack).toBeDefined();
+        expect(token.wcagLevel).toBeDefined();
+      }
+
+      // Execution latency check (< 100ms)
       expect(result.executionTimeMs).toBeLessThan(100);
+      expect(result.fromCache).toBe(false);
     });
 
     it('should generate a valid Birthday blueprint with micro-timeline for cake cutting', async () => {
-      const request: EventPlanRequest = {
+      const planReq: EventPlanRequest = {
         eventType: 'birthday',
         budget: 3500,
         guests: 30,
@@ -58,7 +67,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
         userNotes: 'Laser tag and custom Mario Bros chocolate cake.',
       };
 
-      const result = await engine.generatePlan(request);
+      const result = await engine.generatePlan(planReq);
       const plan = result.plan;
 
       expect(plan.planId).toMatch(/^ecp-bir-/);
@@ -68,7 +77,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
     });
 
     it('should generate a valid Community event with municipal permits and safety RFPs', async () => {
-      const request: EventPlanRequest = {
+      const planReq: EventPlanRequest = {
         eventType: 'community',
         budget: 80000,
         guests: 2000,
@@ -76,7 +85,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
         userNotes: 'Civic music festival with food trucks and EMS support.',
       };
 
-      const result = await engine.generatePlan(request);
+      const result = await engine.generatePlan(planReq);
       const plan = result.plan;
 
       expect(plan.planId).toMatch(/^ecp-com-/);
@@ -88,6 +97,64 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       const safetyVendor = plan.vendorChecklist.find((v) => v.category.toLowerCase().includes('safety'))!;
       expect(safetyVendor).toBeDefined();
       expect(safetyVendor.rfpBrief).toContain('Incident Action Plan');
+    });
+  });
+
+  describe('In-Memory LRU Plan Caching & Performance', () => {
+    it('should serve subsequent identical requests directly from LRU cache with sub-millisecond latency', async () => {
+      const requestPayload: EventPlanRequest = {
+        eventType: 'wedding',
+        budget: 50000,
+        currency: 'USD',
+        guests: 150,
+        targetDate: '2027-06-12',
+        userNotes: 'Classical string quartet preferred.',
+      };
+
+      // Pass 1: Cold execution (miss)
+      const coldResult = await engine.generatePlan(requestPayload);
+      expect(coldResult.fromCache).toBe(false);
+
+      // Pass 2: Hot execution (hit)
+      const hotResult = await engine.generatePlan(requestPayload);
+      expect(hotResult.fromCache).toBe(true);
+      expect(hotResult.plan.planId).toBe(coldResult.plan.planId);
+
+      const stats = engine.getCacheStats();
+      expect(stats.hits).toBe(1);
+      expect(stats.misses).toBe(1);
+      expect(stats.hitRate).toBe(0.5);
+
+      // Clear cache and verify subsequent miss
+      engine.clearCache();
+      const afterClearResult = await engine.generatePlan(requestPayload);
+      expect(afterClearResult.fromCache).toBe(false);
+    });
+
+    it('should exercise PlanCache eviction, TTL expiration, and manual deletion', async () => {
+      const tinyCache = new PlanCache<string>(2, 50); // Capacity 2, TTL 50ms
+
+      tinyCache.set('k1', 'val1');
+      tinyCache.set('k2', 'val2');
+      expect(tinyCache.get('k1')).toBe('val1');
+      expect(tinyCache.has('k2')).toBe(true);
+
+      // Exceed capacity: k2 was accessed least recently, so adding k3 should evict k2
+      tinyCache.set('k3', 'val3');
+      expect(tinyCache.has('k2')).toBe(false);
+      expect(tinyCache.get('k3')).toBe('val3');
+
+      // Manual delete
+      expect(tinyCache.delete('k1')).toBe(true);
+      expect(tinyCache.delete('non-existent')).toBe(false);
+
+      // TTL expiration
+      await new Promise((r) => setTimeout(r, 60));
+      expect(tinyCache.get('k3')).toBeUndefined();
+      expect(tinyCache.has('k3')).toBe(false);
+
+      // Constructor guard
+      expect(() => new PlanCache(0)).toThrow('positive integer');
     });
   });
 
@@ -109,7 +176,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       };
 
       const customEngine = createEventPlannerEngine(customMockLLM);
-      const request: EventPlanRequest = {
+      const planReq: EventPlanRequest = {
         eventType: 'wedding',
         budget: 20000,
         guests: 50,
@@ -117,7 +184,7 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
         userNotes: 'Classical string quartet preferred.',
       };
 
-      const result = await customEngine.generatePlan(request);
+      const result = await customEngine.generatePlan(planReq);
       expect(result.plan).toBeDefined();
 
       // Verify XML Sandboxing in user prompt
@@ -141,14 +208,14 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       };
 
       const brokenEngine = createEventPlannerEngine(brokenMockLLM);
-      const request: EventPlanRequest = {
+      const planReq: EventPlanRequest = {
         eventType: 'wedding',
         budget: 20000,
         guests: 50,
         targetDate: '2027-03-10',
       };
 
-      await expect(brokenEngine.generatePlan(request)).rejects.toThrow(BudgetConservationError);
+      await expect(brokenEngine.generatePlan(planReq)).rejects.toThrow(BudgetConservationError);
     });
 
     it('should catch non-compliant contrast tokens from a buggy mock provider', async () => {
@@ -162,14 +229,14 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       };
 
       const brokenEngine = createEventPlannerEngine(lowContrastMockLLM);
-      const request: EventPlanRequest = {
+      const planReq: EventPlanRequest = {
         eventType: 'wedding',
         budget: 20000,
         guests: 50,
         targetDate: '2027-03-10',
       };
 
-      await expect(brokenEngine.generatePlan(request)).rejects.toThrow(/Accessibility Validation Error/);
+      await expect(brokenEngine.generatePlan(planReq)).rejects.toThrow(/Accessibility Validation Error/);
     });
   });
 
@@ -184,6 +251,18 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       };
 
       await expect(engine.generatePlan(maliciousRequest)).rejects.toThrow(PromptInjectionError);
+    });
+
+    it('should reject requests exceeding 2000 characters payload cap', async () => {
+      const bloatedRequest: EventPlanRequest = {
+        eventType: 'wedding',
+        budget: 25000,
+        guests: 80,
+        targetDate: '2027-01-20',
+        userNotes: 'E'.repeat(2001),
+      };
+
+      await expect(engine.generatePlan(bloatedRequest)).rejects.toThrow(PayloadLimitError);
     });
 
     it('should reject requests with negative budget', async () => {
@@ -249,6 +328,53 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       const testApp = createApp();
       expect(testApp).toBeDefined();
       expect(app).toBeDefined();
+    });
+  });
+
+  describe('Microservice HTTP API Endpoints Integration', () => {
+    it('should return 200 and health info on GET /api/health', async () => {
+      const res = await request(app).get('/api/health');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('UP');
+      expect(res.body.cache).toBeDefined();
+    });
+
+    it('should return 200 and plan data on POST /api/plan', async () => {
+      const res = await request(app)
+        .post('/api/plan')
+        .send({
+          eventType: 'birthday',
+          budget: 5000,
+          guests: 25,
+          targetDate: '2026-12-15',
+          userNotes: 'Bowling party.',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.planId).toBeDefined();
+    });
+
+    it('should return 413 when user notes exceed payload limit', async () => {
+      const res = await request(app)
+        .post('/api/plan')
+        .send({
+          eventType: 'birthday',
+          budget: 5000,
+          guests: 25,
+          targetDate: '2026-12-15',
+          userNotes: 'X'.repeat(2005),
+        });
+
+      expect(res.status).toBe(413);
+      expect(res.body.error.code).toBe('PAYLOAD_LIMIT_EXCEEDED');
+    });
+
+    it('should return cache statistics on GET /api/cache/stats', async () => {
+      const res = await request(app).get('/api/cache/stats');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.stats).toBeDefined();
     });
   });
 });
