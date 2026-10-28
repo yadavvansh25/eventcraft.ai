@@ -168,7 +168,9 @@ describe('Deterministic Math & WCAG 2.1 AA Accessibility Test Suite', () => {
 
       // getWCAGLevel evaluation
       expect(a11yValidator.getWCAGLevel(8.0)).toBe('AAA');
+      expect(a11yValidator.getWCAGLevel(4.6, true)).toBe('AAA');
       expect(a11yValidator.getWCAGLevel(5.0)).toBe('AA');
+      expect(a11yValidator.getWCAGLevel(3.2, true)).toBe('AA');
       expect(a11yValidator.getWCAGLevel(2.0)).toBe('FAIL');
     });
   });

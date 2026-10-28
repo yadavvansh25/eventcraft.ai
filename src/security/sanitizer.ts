@@ -2,9 +2,9 @@
  * SecurityGuard: OWASP Top-10 LLM Defense, Comprehensive PII Scrubbing & Injection Neutralization
  *
  * Implements:
- * 1. Deep PII masking: Emails, Phones, IPv4/IPv6, Credit Cards, SSN, PAN, Aadhaar, Contextual Names.
- * 2. OWASP LLM01 Prompt Injection & Jailbreak Armor: Prefix overrides, DAN persona, delimiter escapes.
- * 3. Script & XSS defanging: script, iframe, embed, object, eval, inline handlers.
+ * 1. Deep PII & Secret masking: Emails, Phones, IPv4/IPv6, Credit Cards, SSN, PAN, Aadhaar, Contextual Names, API Keys, JWTs, Private Keys.
+ * 2. OWASP LLM01 Prompt Injection & Jailbreak Armor: Prefix overrides, DAN persona, delimiter escapes, hidden comments, role spoofing.
+ * 3. Script & XSS defanging: script, iframe, embed, object, eval, inline event handlers.
  * 4. Denial of Wallet / Token Exhaustion defense: Input payload boundary enforcement (2,000 char max).
  */
 
@@ -65,7 +65,7 @@ export class SecurityGuard {
   /** Maximum allowable character count for untrusted user inputs (Denial of Wallet mitigation) */
   public static readonly MAX_INPUT_LENGTH = 2000;
 
-  // --- High-Confidence PII Regular Expressions ---
+  // --- High-Confidence PII & Secret Regular Expressions ---
   private static readonly EMAIL_REGEX =
     /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 
@@ -93,6 +93,18 @@ export class SecurityGuard {
   // Standard Credit Cards (13-19 digits, spaced or dashed)
   private static readonly CREDIT_CARD_REGEX =
     /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|(?:[0-9]{4}[-\s]){3}[0-9]{4})\b/g;
+
+  // JSON Web Tokens (JWT)
+  private static readonly JWT_REGEX =
+    /\beyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b/g;
+
+  // Cloud API Keys & Bearer Tokens (AWS AKIA, OpenAI sk-, GitHub ghp_, Bearer)
+  private static readonly API_KEY_REGEX =
+    /\b(?:sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{36,}|Bearer\s+[a-zA-Z0-9_\-\.]{16,})\b/gi;
+
+  // Private Key Blocks
+  private static readonly PRIVATE_KEY_REGEX =
+    /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g;
 
   // Pass 2: Contextual Personal Name Redaction
   private static readonly CONTEXTUAL_NAME_REGEX =
@@ -122,6 +134,13 @@ export class SecurityGuard {
       severity: 'critical',
       description: 'Known DAN persona or unrestricted mode invocation',
     },
+    {
+      id: 'SIMULATION_JAILBREAK',
+      pattern:
+        /\b(?:simulate|pretend|act\s+as\s+if|in\s+developer\s+mode|as\s+an\s+unfiltered|unhinged\s+ai|jailbreak\s+mode|sudo\s+mode)\b/i,
+      severity: 'high',
+      description: 'Simulation or sudo persona evasion attempt',
+    },
     // 2. Delimiter Injection & Sandboxing Escape
     {
       id: 'DELIMITER_INJECTION',
@@ -130,11 +149,25 @@ export class SecurityGuard {
       severity: 'critical',
       description: 'Deliberate delimiter injection to forge model role boundaries',
     },
+    {
+      id: 'ROLE_DELIMITER_SPOOFING',
+      pattern:
+        /(?:<\|im_start\|>|<\|im_end\|>|<\|endoftext\|>|\[INST\]|\[\/INST\]|<<SYS>>|<\/<<SYS>>)/i,
+      severity: 'critical',
+      description: 'Model token boundary spoofing attack',
+    },
+    {
+      id: 'INDIRECT_COMMENT_INJECTION',
+      pattern:
+        /(?:<!--[\s\S]*?(?:ignore|system|instruction|bypass)[\s\S]*?-->)/i,
+      severity: 'high',
+      description: 'Indirect prompt injection hidden inside markup comments',
+    },
     // 3. Payload Scripts & XSS Injections
     {
       id: 'SCRIPT_PAYLOAD',
       pattern:
-        /(?:<script[\s\S]*?>[\s\S]*?<\/script>|<script\b|<iframe\b|<object\b|<embed\b|<applet\b|javascript:|onerror\s*=|onload\s*=|onclick\s*=|eval\s*\(|document\.cookie)/i,
+        /(?:<script[\s\S]*?>[\s\S]*?<\/script>|<script\b|<iframe\b|<object\b|<embed\b|<applet\b|javascript:|onerror\s*=|onload\s*=|onclick\s*=|onmouseover\s*=|onfocus\s*=|eval\s*\(|document\.cookie)/i,
       severity: 'critical',
       description: 'Embedded executable script, iframe, or cross-site scripting payload',
     },
@@ -172,7 +205,7 @@ export class SecurityGuard {
   }
 
   /**
-   * Deep PII scrubber: replaces sensitive identifiers with [REDACTED] tokens.
+   * Deep PII scrubber: replaces sensitive identifiers and secret tokens with [REDACTED] tokens.
    */
   public scrubPII(input: string): SanitizationResult {
     if (!input || typeof input !== 'string') {
@@ -183,7 +216,25 @@ export class SecurityGuard {
     let redactedCount = 0;
     let currentText = input;
 
-    // Pass 1: High-Confidence Regex Scrubbing
+    // Pass 1: High-Confidence Regex Scrubbing for Secrets & PII
+    currentText = currentText.replace(SecurityGuard.PRIVATE_KEY_REGEX, () => {
+      redactedCount++;
+      detectedTypesSet.add('private_key');
+      return '[REDACTED]';
+    });
+
+    currentText = currentText.replace(SecurityGuard.JWT_REGEX, () => {
+      redactedCount++;
+      detectedTypesSet.add('jwt');
+      return '[REDACTED]';
+    });
+
+    currentText = currentText.replace(SecurityGuard.API_KEY_REGEX, () => {
+      redactedCount++;
+      detectedTypesSet.add('api_key');
+      return '[REDACTED]';
+    });
+
     currentText = currentText.replace(SecurityGuard.CREDIT_CARD_REGEX, () => {
       redactedCount++;
       detectedTypesSet.add('credit_card');
@@ -299,12 +350,15 @@ export class SecurityGuard {
   }
 
   /**
-   * Neutralizes prompt delimiters, script payloads, and override directives safely.
+   * Neutralizes prompt delimiters, script payloads, hidden comments, and override directives safely.
    */
   public neutralize(input: string): string {
     if (!input || typeof input !== 'string') return '';
 
     let cleaned = input;
+
+    // Strip invisible zero-width unicode characters
+    cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF\u00A0\u202A-\u202E]/g, '');
 
     // Defang script and iframe tags
     cleaned = cleaned.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '[DEFANGED_SCRIPT]');
@@ -314,6 +368,12 @@ export class SecurityGuard {
     cleaned = cleaned.replace(/<(object|embed|applet)\b/gi, '[$1');
     cleaned = cleaned.replace(/javascript:/gi, 'blocked-script:');
     cleaned = cleaned.replace(/eval\s*\(/gi, 'blocked-eval(');
+
+    // Defang HTML comments used for indirect injection
+    cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '[DEFANGED_COMMENT]');
+
+    // Defang model token role delimiters
+    cleaned = cleaned.replace(/<\|im_start\|>|<\|im_end\|>|<\|endoftext\|>|\[INST\]|\[\/INST\]|<<SYS>>|<\/<<SYS>>/gi, '[DEFANGED_DELIMITER]');
 
     // Defang markdown and XML delimiters
     cleaned = cleaned.replace(/```/g, "'''");

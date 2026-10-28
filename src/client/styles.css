@@ -56,6 +56,29 @@ body {
   outline-offset: 3px;
 }
 
+/* WCAG 2.4.1 Bypass Blocks - Skip to Content */
+.skip-link {
+  position: absolute;
+  top: -60px;
+  left: 12px;
+  background: var(--accent-primary);
+  color: #0B0F17;
+  padding: 10px 18px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  z-index: 9999;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: top 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.skip-link:focus {
+  top: 12px;
+  outline: 3px solid #FFFFFF;
+  outline-offset: 2px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

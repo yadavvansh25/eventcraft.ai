@@ -144,6 +144,10 @@ describe('PlannerEngine - End-to-End Orchestrator & Mock Execution', () => {
       expect(tinyCache.has('k2')).toBe(false);
       expect(tinyCache.get('k3')).toBe('val3');
 
+      // Update existing key
+      tinyCache.set('k3', 'val3_updated');
+      expect(tinyCache.get('k3')).toBe('val3_updated');
+
       // Manual delete
       expect(tinyCache.delete('k1')).toBe(true);
       expect(tinyCache.delete('non-existent')).toBe(false);

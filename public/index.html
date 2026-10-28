@@ -11,6 +11,9 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- WCAG 2.4.1 Bypass Blocks: Skip to Main Content -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
   <!-- Live ARIA Announcement Region for Screen Readers -->
   <div id="aria-live-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
@@ -80,9 +83,9 @@
         <div class="form-field">
           <label for="user-notes">
             User Notes & Raw Intent 
-            <span class="label-helper">(Includes automated dual-pass PII scrub & prompt injection neutralization)</span>
+            <span id="user-notes-helper" class="label-helper">(Includes automated dual-pass PII scrub & prompt injection neutralization)</span>
           </label>
-          <textarea id="user-notes" name="userNotes" rows="3" placeholder="e.g. Call Jane at 555-839-2910 for floral specs. We need outdoor acoustic staging, gluten-free catering options, and an elegant botanical palette."></textarea>
+          <textarea id="user-notes" name="userNotes" rows="3" aria-describedby="user-notes-helper" placeholder="e.g. Call Jane at 555-839-2910 for floral specs. We need outdoor acoustic staging, gluten-free catering options, and an elegant botanical palette."></textarea>
         </div>
 
         <div class="form-actions">
@@ -213,7 +216,7 @@
   </main>
 
   <!-- RFP Modal Dialog -->
-  <dialog id="rfp-modal" class="app-dialog" aria-labelledby="modal-rfp-title">
+  <dialog id="rfp-modal" class="app-dialog" aria-labelledby="modal-rfp-title" aria-modal="true">
     <div class="dialog-content">
       <div class="dialog-header">
         <h3 id="modal-rfp-title" class="dialog-title">Request For Proposal (RFP) Brief</h3>

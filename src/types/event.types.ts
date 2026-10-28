@@ -19,7 +19,7 @@ export type WCAGLevel = 'AAA' | 'AA' | 'FAIL';
 export interface AccessibilityMeta {
   readonly ariaLive: AriaLiveMode;
   readonly ariaLabel: string;
-  readonly ariaDescription?: string;
+  readonly ariaDescription?: string | undefined;
   readonly focusIndex: number;
 }
 
@@ -52,7 +52,7 @@ export interface TimelineMilestone {
   taskPriority: AllocationPriority;
   actionItems: string[];
   accessibility: AccessibilityMeta;
-  ariaAnnouncement?: string;
+  ariaAnnouncement?: string | undefined;
 }
 
 /**
@@ -74,17 +74,17 @@ export interface ColorToken {
   hex: string;
   tokenName: string;
   contrastRatioAgainstWhite: number;
-  contrastRatioAgainstBlack?: number;
+  contrastRatioAgainstBlack?: number | undefined;
   wcagCompliant: boolean;
-  wcagLevel?: WCAGLevel;
-  isLargeElementOnly?: boolean;
+  wcagLevel?: WCAGLevel | undefined;
+  isLargeElementOnly?: boolean | undefined;
 }
 
 /**
  * Creative sensory suite & styling tokens
  */
 export interface CreativeTheme {
-  themeName?: string;
+  themeName?: string | undefined;
   vibeName: string;
   narrative: string;
   colorPalette: ColorToken[];
@@ -125,15 +125,15 @@ export interface EventPlan {
 export interface EventPlanRequest {
   eventType: EventType;
   budget: number;
-  currency?: string;
+  currency?: string | undefined;
   guests: number;
   targetDate: string;
-  userNotes?: string;
-  categoryPriorities?: Record<string, AllocationPriority>;
-  venueType?: string;
-  stagingNeeds?: string;
-  tone?: string;
-  lightingContext?: 'indoor' | 'outdoor_day' | 'outdoor_night' | 'ballroom' | 'park';
+  userNotes?: string | undefined;
+  categoryPriorities?: Record<string, AllocationPriority> | undefined;
+  venueType?: string | undefined;
+  stagingNeeds?: string | undefined;
+  tone?: string | undefined;
+  lightingContext?: ('indoor' | 'outdoor_day' | 'outdoor_night' | 'ballroom' | 'park') | undefined;
 }
 
 /**
@@ -166,5 +166,5 @@ export interface GenerationResult {
   readonly plan: EventPlan;
   readonly executionTimeMs: number;
   readonly cleanContext: CleanContextPayload;
-  readonly fromCache?: boolean;
+  readonly fromCache?: boolean | undefined;
 }

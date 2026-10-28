@@ -11,7 +11,7 @@ function parseArgs(args: string[]): {
   guests: number;
   date: string;
   notes: string;
-  output?: string;
+  output?: string | undefined;
   jsonOnly: boolean;
   help: boolean;
 } {
