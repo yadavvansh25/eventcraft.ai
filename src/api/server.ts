@@ -1,5 +1,6 @@
 import express, { Express } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createEventCraftRouter } from './routes';
 
 export function createApp(): Express {
@@ -12,8 +13,17 @@ export function createApp(): Express {
   app.use('/api', router);
   app.use('/health', (_req, res) => res.redirect('/api/health'));
 
-  // Static files for Demonstrator Web UI
-  const clientDir = path.join(__dirname, '../client');
+  // Static files for Demonstrator Web UI (robust cross-environment resolution for Vercel & local)
+  const clientCandidates = [
+    path.join(process.cwd(), 'public'),
+    path.join(__dirname, '../client'),
+    path.join(process.cwd(), 'src/client'),
+    path.join(__dirname, '../../public'),
+  ];
+  const clientDir =
+    clientCandidates.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) ??
+    path.join(__dirname, '../client');
+
   app.use(express.static(clientDir));
 
   // Fallback to client index.html
